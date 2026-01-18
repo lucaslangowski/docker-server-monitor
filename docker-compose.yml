@@ -65,6 +65,14 @@ services:
     image: ghcr.io/analogj/scrutiny:master-omnibus
     container_name: scrutiny
     restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 100M
+        reservations:
+          cpus: '0.05'
+          memory: 25M
     cap_add:
       - SYS_RAWIO
     ports:
@@ -83,6 +91,15 @@ services:
     image: louislam/uptime-kuma:2
     container_name: uptime-kuma
     restart: always
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.60'
+          memory: 100M
+        reservations:
+          cpus: '0.25'
+          memory: 50M
     volumes:
       - uptime-kuma:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
