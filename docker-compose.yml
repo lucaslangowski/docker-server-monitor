@@ -1,0 +1,162 @@
+name: monitoring
+services:
+  beszel:
+    image: henrygd/beszel:latest
+    container_name: beszel
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 25M
+        reservations:
+          cpus: '0.10'
+          memory: 15M
+    healthcheck:
+      # The URL is relative to the container, not the host
+      test: ['CMD', '/beszel', 'health', '--url', 'http://localhost:8090']
+      start_period: 5s # Check 5 seconds after the container starts
+      interval: 120s # Then check every 120 seconds after that
+    ports:
+      - ${BESZEL_PORT}:8090
+    volumes:
+      - ./beszel_data:/beszel_data
+      - ./beszel_socket:/beszel_socket
+    environment:
+      - APP_URL=http://${DOMAIN_NAME}:${BESZEL_PORT}
+      - USER_EMAIL=${BESZEL_EMAIL}
+      - USER_PASSWORD=${BESZEL_PASSWORD}
+
+  beszel-agent-intel:
+    image: henrygd/beszel-agent-intel:latest
+    container_name: beszel-agent-intel
+    restart: always
+    network_mode: host
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 25M
+        reservations:
+          cpus: '0.05'
+          memory: 10M
+    healthcheck:
+      test: ['CMD', '/agent', 'health']
+      interval: 120s
+    cap_add:
+      - CAP_PERFMON
+      - CAP_SYS_ADMIN
+      - CAP_DAC_OVERRIDE
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./beszel_agent_data:/var/lib/beszel-agent
+      - ./beszel_socket:/beszel_socket
+      # monitor other disks / partitions by mounting a folder in /extra-filesystems
+      # - /mnt/disk/.beszel:/extra-filesystems/sda1:ro
+    environment:
+      LISTEN: /beszel_socket/beszel.sock
+      KEY: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGLtKQ405D9hLnVOjC+A4QPcheJfmy4E1G2NBGTiSbD8'
+      TOKEN: de1c-87f1baeb7-12b54-41d4151f9
+      HUB_URL: http://${DOMAIN_NAME}:${BESZEL_PORT}
+    devices:
+      - /dev/dri/card1:/dev/dri/card1
+
+  scrutiny:
+    image: ghcr.io/analogj/scrutiny:master-omnibus
+    container_name: scrutiny
+    restart: always
+    cap_add:
+      - SYS_RAWIO
+    ports:
+      - ${SCRUTINY_PORT}:8080 # webapp
+    volumes:
+      - /run/udev:/run/udev:ro
+      - /dev:/dev:ro
+      - /mnt/tank/configs/scrutiny:/opt/scrutiny/config
+      - /mnt/tank/configs/scrutiny/influxdb:/opt/scrutiny/influxdb
+    devices:
+      - "/dev/sda"
+      - "/dev/sdb"
+      - "/dev/sdc"
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:2
+    container_name: uptime-kuma
+    restart: always
+    volumes:
+      - uptime-kuma:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - UPTIME_KUMA_PORT=${UPTIMEKUMA_PORT}
+    network_mode: host
+
+  speedtest-tracker:
+      image: lscr.io/linuxserver/speedtest-tracker:latest
+      container_name: speedtest-tracker
+      restart: always
+      deploy:
+        resources:
+          limits:
+            cpus: '0.50'
+            memory: 200M
+          reservations:
+            cpus: '0.25'
+            memory: 150M
+      healthcheck:
+        test: curl -fSs http://localhost:80/api/healthcheck || exit 1
+        start_period: 5s
+        interval: 120s
+      ports:
+        - ${SPEEDTEST_PORT}:80
+      environment:
+        - PUID=1000
+        - PGID=1000
+        - TZ=${TIMEZONE}
+        - APP_KEY=${APP_KEY}
+        - APP_URL=http://${DOMAIN_NAME}:${SPEEDTEST_PORT}
+        - DB_CONNECTION=pgsql
+        - SPEEDTEST_SCHEDULE=0 */1 * * *
+        - DB_HOST=speedtest-db
+        - DB_PORT=5432
+        - DB_DATABASE=${SPEEDTEST_DB_DATABASE}
+        - DB_USERNAME=${SPEEDTEST_DB_USER}
+        - DB_PASSWORD=${SPEEDTEST_DB_PASSWORD}
+        - DISPLAY_TIMEZONE=${TIMEZONE}
+        - PRUNE_RESULTS_OLDER_THAN=0
+      volumes:
+        - speedtest_config:/config
+      depends_on:
+        - speedtest-tracker-db
+
+  speedtest-tracker-db:
+    image: postgres:latest
+    container_name: speedtest-db
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 50M
+        reservations:
+          cpus: '0.25'
+          memory: 30M
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -d $SPEEDTEST_DB_DATABASE -U $SPEEDTEST_DB_USER" ]
+      interval: 60s
+      timeout: 30s
+      retries: 10
+    ports:
+      - 5442:5432
+    volumes:
+      - speedtest_db:/var/lib/postgresql
+    environment:
+      - POSTGRES_DB=${SPEEDTEST_DB_DATABASE}
+      - POSTGRES_USER=${SPEEDTEST_DB_USER}
+      - POSTGRES_PASSWORD=${SPEEDTEST_DB_PASSWORD}
+      - TZ=UTC
+      - PGTZ=UTC
+
+volumes:
+  speedtest_config:
+  speedtest_db:
+  uptime-kuma:
